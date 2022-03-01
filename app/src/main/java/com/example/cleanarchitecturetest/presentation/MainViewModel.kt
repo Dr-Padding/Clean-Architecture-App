@@ -18,14 +18,14 @@ class MainViewModel(
 
 
     fun get() {
-        val userName = getUserNameUseCase.execute()
+        val userName = getUserNameUseCase()
         val fullName = "${userName.firstName} ${userName.lastName}"
         _liveData.postValue(_liveData.value?.copy(fullName = fullName))
     }
 
     fun save(text: String){
         val nameOnly = SaveUserNameParam(name = text)
-        val result = saveUserNameUseCase.execute(nameOnly = nameOnly)
+        val result = saveUserNameUseCase(nameOnly = nameOnly)
         _liveData.postValue(_liveData.value?.copy(fullName = "Save result = ${result}"))
     }
 

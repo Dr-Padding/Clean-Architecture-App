@@ -2,14 +2,8 @@ package com.example.cleanarchitecturetest.presentation
 
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
-import androidx.lifecycle.Observer
 import androidx.lifecycle.ViewModelProvider
-import com.example.cleanarchitecturetest.data.repository.UserRepository
-import com.example.cleanarchitecturetest.data.storage.sharedprefs.SharedPrefsUserStorage
 import com.example.cleanarchitecturetest.databinding.ActivityMainBinding
-import com.example.cleanarchitecturetest.domain.models.SaveUserNameParam
-import com.example.cleanarchitecturetest.domain.usecase.GetUserNameUseCase
-import com.example.cleanarchitecturetest.domain.usecase.SaveUserNameUseCase
 
 class MainActivity : AppCompatActivity() {
 
