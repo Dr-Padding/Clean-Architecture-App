@@ -53,7 +53,7 @@ dependencies {
     //DI KOIN
 
     // Koin for Kotlin apps
-    def koin_version= "3.1.5"
+    def koin_version= "3.2.0-beta-1"
     // Koin Core features
     implementation "io.insert-koin:koin-core:$koin_version"
     // Koin Test features
