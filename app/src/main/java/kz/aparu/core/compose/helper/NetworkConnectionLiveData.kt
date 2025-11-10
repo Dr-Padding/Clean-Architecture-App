@@ -1,6 +1,7 @@
 package kz.aparu.core.compose.helper
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
 import android.net.ConnectivityManager
@@ -37,7 +38,7 @@ class NetworkConnectionLiveData(context: Context) : LiveData<NetworkStatus>() {
             postValue(NetworkStatus.Unavailable)
         }
 
-        override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
+        override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
             postValue(getNetworkStatus())
         }
     }
@@ -55,13 +56,17 @@ class NetworkConnectionLiveData(context: Context) : LiveData<NetworkStatus>() {
 
     private fun registerCallbackSafely() {
         try {
-            val networkRequest = NetworkRequest.Builder()
-                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                .build()
-            connectivityManager.registerNetworkCallback(networkRequest, networkCallback)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                connectivityManager.registerDefaultNetworkCallback(networkCallback)
+            } else {
+                val request = NetworkRequest.Builder()
+                    .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    .build()
+                connectivityManager.registerNetworkCallback(request, networkCallback)
+            }
         } catch (_: SecurityException) {
-            // ACCESS_NETWORK_STATE should normally be granted from the manifest, but if OEMs
-            // block it we simply skip listening for further updates.
+            // ACCESS_NETWORK_STATE should normally be granted from the manifest, but some OEMs may
+            // restrict it. If so, skip listening for further updates.
         }
     }
 
@@ -74,10 +79,38 @@ class NetworkConnectionLiveData(context: Context) : LiveData<NetworkStatus>() {
     }
 
     private fun getNetworkStatus(): NetworkStatus {
-        val activeNetwork = connectivityManager.activeNetwork ?: return NetworkStatus.Unavailable
-        val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork)
-            ?: return NetworkStatus.Unavailable
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val activeNetwork = connectivityManager.activeNetwork ?: return NetworkStatus.Unavailable
+            val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork)
+                ?: return NetworkStatus.Unavailable
 
+            evaluateCapabilities(capabilities)
+        } else {
+            @Suppress("DEPRECATION")
+            val info = connectivityManager.activeNetworkInfo ?: return NetworkStatus.Unavailable
+            @Suppress("DEPRECATION")
+            if (!info.isConnected) return NetworkStatus.Unavailable
+
+            @Suppress("DEPRECATION")
+            when (info.type) {
+                ConnectivityManager.TYPE_WIFI,
+                ConnectivityManager.TYPE_ETHERNET -> NetworkStatus.Available
+                ConnectivityManager.TYPE_MOBILE,
+                ConnectivityManager.TYPE_MOBILE_DUN,
+                ConnectivityManager.TYPE_MOBILE_HIPRI -> {
+                    val legacySubtype = info.subtype
+                    if (isCellularFast(UNKNOWN_BANDWIDTH_KBPS, legacySubtype)) {
+                        NetworkStatus.Available
+                    } else {
+                        NetworkStatus.Degraded
+                    }
+                }
+                else -> NetworkStatus.Degraded
+            }
+        }
+    }
+
+    private fun evaluateCapabilities(capabilities: NetworkCapabilities): NetworkStatus {
         if (!capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
             return NetworkStatus.Unavailable
         }
@@ -100,11 +133,11 @@ class NetworkConnectionLiveData(context: Context) : LiveData<NetworkStatus>() {
     }
 
     private fun isBandwidthFast(bandwidthKbps: Int, thresholdKbps: Int): Boolean {
-        return bandwidthKbps == NetworkCapabilities.LINK_BANDWIDTH_UNSPECIFIED || bandwidthKbps >= thresholdKbps
+        return bandwidthKbps <= 0 || bandwidthKbps >= thresholdKbps
     }
 
-    private fun isCellularFast(downstreamKbps: Int): Boolean {
-        val networkType = safeDataNetworkType()
+    private fun isCellularFast(downstreamKbps: Int, legacySubtype: Int? = null): Boolean {
+        val networkType = safeDataNetworkType() ?: legacySubtype
 
         return when (networkType) {
             TelephonyManager.NETWORK_TYPE_GPRS,
@@ -112,9 +145,6 @@ class NetworkConnectionLiveData(context: Context) : LiveData<NetworkStatus>() {
             TelephonyManager.NETWORK_TYPE_CDMA,
             TelephonyManager.NETWORK_TYPE_1xRTT,
             TelephonyManager.NETWORK_TYPE_IDEN -> false
-
-            TelephonyManager.NETWORK_TYPE_UNKNOWN, null ->
-                isBandwidthFast(downstreamKbps, CELLULAR_FAST_THRESHOLD_KBPS)
 
             TelephonyManager.NETWORK_TYPE_UMTS,
             TelephonyManager.NETWORK_TYPE_EVDO_0,
@@ -126,23 +156,36 @@ class NetworkConnectionLiveData(context: Context) : LiveData<NetworkStatus>() {
             TelephonyManager.NETWORK_TYPE_EHRPD,
             TelephonyManager.NETWORK_TYPE_HSPAP -> false
 
+            TelephonyManager.NETWORK_TYPE_UNKNOWN,
+            null -> isBandwidthFast(downstreamKbps, CELLULAR_FAST_THRESHOLD_KBPS)
+
             else -> true
         }
     }
 
+    @SuppressLint("MissingPermission")
     private fun safeDataNetworkType(): Int? {
         val manager = telephonyManager ?: return null
         if (!hasAnyPhoneStatePermission()) return null
 
         return try {
-            manager.dataNetworkType
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                manager.dataNetworkType
+            } else {
+                @Suppress("DEPRECATION")
+                manager.networkType
+            }
         } catch (_: SecurityException) {
             null
         }
     }
 
     private fun hasAnyPhoneStatePermission(): Boolean {
-        if (ContextCompat.checkSelfPermission(appContext, Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED) {
+        if (ContextCompat.checkSelfPermission(
+                appContext,
+                Manifest.permission.READ_PHONE_STATE
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
             return true
         }
 
@@ -161,6 +204,7 @@ class NetworkConnectionLiveData(context: Context) : LiveData<NetworkStatus>() {
         private const val WIFI_FAST_THRESHOLD_KBPS = 550
         private const val OTHER_FAST_THRESHOLD_KBPS = 550
         private const val CELLULAR_FAST_THRESHOLD_KBPS = 200
+        private const val UNKNOWN_BANDWIDTH_KBPS = -1
     }
 }
 
